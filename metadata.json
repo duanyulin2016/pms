@@ -1,0 +1,8 @@
+{
+  "name": "护照出入库管理系统",
+  "description": "用于护照等证件的扫码入库、出库管理、模糊查询及数据导出的企业级系统。",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

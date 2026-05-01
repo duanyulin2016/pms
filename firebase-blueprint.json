@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user account",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string", "description": "Stored encrypted or plain for local dev, but should be managed by Auth" },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "status": { "type": "string", "enum": ["pending", "approved"] }
+      },
+      "required": ["id", "username", "role", "status"]
+    },
+    "PassportLog": {
+      "title": "Passport Log",
+      "description": "Individual action on a passport",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "action": { "type": "string", "enum": ["ENTRY", "CHECKOUT", "RETURN"] },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "operator": { "type": "string" },
+        "borrowerName": { "type": "string" },
+        "borrowerSignature": { "type": "string" }
+      }
+    },
+    "PassportRecord": {
+      "title": "Passport Record",
+      "description": "Record of a passport in the system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "passportId": { "type": "string" },
+        "name": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "entryTime": { "type": "string", "format": "date-time" },
+        "exitTime": { "type": "string", "format": "date-time" },
+        "borrowerName": { "type": "string" },
+        "borrowerSignature": { "type": "string" },
+        "history": {
+          "type": "array",
+          "items": { "$ref": "#/entities/PassportLog" }
+        },
+        "status": { "type": "string", "enum": ["IN_VAULT", "CHECKED_OUT"] },
+        "operator": { "type": "string" }
+      },
+      "required": ["id", "passportId", "name", "status"]
+    },
+    "UserActionLog": {
+      "title": "User Action Log",
+      "description": "Log of admin actions on users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "operatorName": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "targetUserName": { "type": "string" },
+        "action": { "type": "string", "enum": ["ROLE_CHANGE", "PASSWORD_RESET", "USER_DELETE", "USER_APPROVE"] },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/records/{recordId}": {
+      "schema": "PassportRecord",
+      "description": "Passport tracking records"
+    },
+    "/logs/{logId}": {
+      "schema": "UserActionLog",
+      "description": "Audit trails for user management"
+    }
+  }
+}
