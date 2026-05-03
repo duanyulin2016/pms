@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import { parseChinesePassportMrzWithOcrFix } from './src/utils/mrzParser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +53,8 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(bodyParser.json());
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
   // --- API Routes ---
 
@@ -157,6 +159,115 @@ async function startServer() {
     db.logs.unshift(newLog);
     writeDB(db);
     res.status(201).json(newLog);
+  });
+
+  // OCR Endpoint using DashScope Qwen VL Max (compatible API mode)
+  app.post('/api/ocr', async (req, res) => {
+    try {
+      const { image } = req.body;
+      if (!image) return res.status(400).json({ message: 'Image is required' });
+      
+      const apiKey = process.env.DASHSCOPE_API_KEY;
+      if (!apiKey) return res.status(500).json({ message: 'DASHSCOPE_API_KEY environment variable is not set on the server.' });
+
+      // Use the OpenAI-compatible completion endpoint for Qwen VL
+      const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'qwen-vl-plus',
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: 'system',
+              content: `You are an expert OCR system. Extract the MRZ (Machine Readable Zone) from the passport image.
+MRZ consists of exactly 2 lines at the bottom of the passport.
+Output ONLY a JSON object containing the raw MRZ text in a 'mrz' key. 
+
+OUTPUT FORMAT:
+{
+  "mrz": "line1\\nline2"
+}`
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: image
+                  }
+                },
+                {
+                  type: 'text',
+                  text: 'Please scan the passport MRZ from this image and return the parsed JSON.'
+                }
+              ]
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('OCR API Error:', errorText);
+        return res.status(response.status).json({ message: 'OCR server failed to process the image.' });
+      }
+
+      const data = await response.json();
+      try {
+        let resultText = data.choices[0].message.content;
+        
+        // Try to extract from markdown code blocks first
+        const jsonMatch = resultText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          resultText = jsonMatch[1];
+        } else {
+          // Fallback: try to find the outermost {}
+          const firstBrace = resultText.indexOf('{');
+          const lastBrace = resultText.lastIndexOf('}');
+          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            resultText = resultText.substring(firstBrace, lastBrace + 1);
+          }
+        }
+        
+        const parsed = JSON.parse(resultText);
+        let rawMrz = parsed.mrz || '';
+        
+        // Use our robust offline parser with OCR heuristic fixes
+        const parsedMrz = parseChinesePassportMrzWithOcrFix(rawMrz);
+        if ('error' in parsedMrz) {
+          return res.status(400).json({ message: parsedMrz.error, raw: rawMrz });
+        }
+        
+        // Map to frontend expected format
+        const mappedResult = {
+          passportId: parsedMrz.documentNumber || '',
+          name: ((parsedMrz.surname || '') + ' ' + (parsedMrz.givenNames || '')).trim(),
+          dob: parsedMrz.birthDate || '',
+          expiryDate: parsedMrz.expiryDate || '',
+          country: parsedMrz.issuingCountry || '',
+          nationality: parsedMrz.nationality || '',
+          sex: parsedMrz.sex || '',
+          checksumValid: parsedMrz.checks?.overallValid ?? true,
+          rawMrz: parsedMrz.correctedMrz || rawMrz,
+          notes: parsedMrz.ocrCorrections && parsedMrz.ocrCorrections.length > 0 
+            ? `OCR Corrections: ${parsedMrz.ocrCorrections.join(', ')}` 
+            : ''
+        };
+        
+        res.json(mappedResult);
+      } catch (parseError) {
+        console.error('Failed to parse OCR response as JSON:', data.choices[0].message.content);
+        res.status(500).json({ message: 'Failed to parse AI response.', raw: data.choices[0].message.content });
+      }
+    } catch (e: any) {
+      console.error('OCR API Exception:', e);
+      res.status(500).json({ message: e.message || 'Unknown error' });
+    }
   });
 
   // Vite middleware for development

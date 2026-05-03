@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   LogIn, Search, LogOut, Download, ScanLine, 
   Edit, Trash2, ShieldCheck, UserCircle, History, PackagePlus, AlertCircle, Eye, CornerDownLeft, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Users
@@ -7,6 +7,7 @@ import { PassportRecord, User, PassportStatus, PassportLog } from './types';
 import { LoginScreen } from './LoginScreen';
 import { UsersView } from './UsersView';
 import { PasswordChangeModal } from './PasswordChangeModal';
+import { CameraScanner } from './components/CameraScanner';
 import { subscribeToRecords, addRecord, updateRecord, deleteRecord } from './services/records';
 
 const STORAGE_KEY = 'passport_db_records';
@@ -168,22 +169,26 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
   onAdd: (r: PassportRecord) => void,
   onUpdate: (id: string, updated: Partial<PassportRecord>) => void
 }) {
-  const [scanInput, setScanInput] = useState('');
   const [formData, setFormData] = useState({
-    passportId: '', name: '', issueDate: '', expiryDate: ''
+    passportId: '', name: '', country: '', nationality: '', dob: '', sex: '', expiryDate: ''
   });
   const [toast, setToast] = useState('');
+  const [systemLog, setSystemLog] = useState('');
 
-  // Simulate scanning a passport MRZ or a barcode
-  const handleSimulateScan = () => {
-    setFormData({
-      passportId: 'E' + Math.floor(Math.random() * 100000000).toString(),
-      name: 'ZHANG SAN',
-      issueDate: '2020-01-01',
-      expiryDate: '2030-01-01',
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (logEndRef.current) {
+      logEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [systemLog]);
+
+  const appendLog = (msg: string) => {
+    setSystemLog(prev => {
+      const timestamp = new Date().toLocaleTimeString();
+      const newEntry = `[📢 ${timestamp}] ${msg}`;
+      return prev ? `${prev}\n\n${newEntry}` : newEntry;
     });
-    setToast('✅ 扫码解析成功！请核对信息。');
-    setTimeout(() => setToast(''), 3000);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -203,13 +208,16 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
               operator: currentUser.username
             }]
          });
-         setToast(`✅ 归还成功！该证件 (${existingRecord.name}) 已成功入库。`);
+         const msg = `✅ 归还成功！该证件 (${existingRecord.name}) 已成功入库。`;
+         setToast(msg);
+         appendLog(msg);
       } else {
-         setToast(`⚠️ 该证件 (${existingRecord.name}) 已经在库中，系统无需重复录入！`);
+         const msg = `⚠️ 该证件 (${existingRecord.name}) 已经在库中，系统无需重复录入！`;
+         setToast(msg);
+         appendLog(msg);
       }
       setTimeout(() => setToast(''), 4000);
-      setFormData({ passportId: '', name: '', issueDate: '', expiryDate: '' });
-      setScanInput('');
+      setFormData({ passportId: '', name: '', country: '', nationality: '', dob: '', sex: '', expiryDate: '' });
       return;
     }
 
@@ -224,7 +232,10 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
       id: generateId(),
       passportId: formData.passportId,
       name: formData.name,
-      issueDate: formData.issueDate,
+      country: formData.country,
+      nationality: formData.nationality,
+      dob: formData.dob,
+      sex: formData.sex,
       expiryDate: formData.expiryDate,
       entryTime: new Date().toISOString(),
       status: 'IN_VAULT',
@@ -233,10 +244,11 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
     };
     onAdd(newRecord);
     
+    const msg = `✅ 首次入库登记成功！\n入库证件: ${formData.passportId} (${formData.name})`;
     setToast('✅ 首次入库登记成功！');
+    appendLog(msg);
     setTimeout(() => setToast(''), 3000);
-    setFormData({ passportId: '', name: '', issueDate: '', expiryDate: '' });
-    setScanInput('');
+    setFormData({ passportId: '', name: '', country: '', nationality: '', dob: '', sex: '', expiryDate: '' });
   };
 
   return (
@@ -253,25 +265,42 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
         <div className="glass-panel rounded-xl overflow-hidden mb-6">
           {/* Scan Section */}
           <div className="p-6 border-b border-border relative bg-primary">
-            <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-2">扫描区域自动识别 (支持手动模拟)</label>
-            <div className="flex gap-4">
-              <div className="relative flex-1">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <ScanLine className="h-5 w-5 opacity-40 text-main" />
-                </div>
-                <input
-                  type="text"
-                  autoFocus
-                  value={scanInput}
-                  onChange={(e) => setScanInput(e.target.value)}
-                  placeholder="等待扫码枪输入..."
-                  className="block w-full bg-surface border-border shadow-sm rounded pl-10 pr-3 py-2.5 text-sm text-main focus:outline-none focus:border-accent transition-colors"
-                />
-              </div>
-              <button onClick={handleSimulateScan} type="button" className="bg-accent text-white hover:opacity-90 font-semibold px-6 py-2.5 rounded transition-all text-sm shrink-0">
-                模拟填入
-              </button>
-            </div>
+            <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-4">护照 MRZ 摄像头智能识别</label>
+            <CameraScanner 
+              onScanStart={() => {
+                const timestamp = new Date().toLocaleTimeString();
+                setSystemLog(prev => {
+                  const newEntry = `[⏳ ${timestamp}] 正在识别...`;
+                  return prev ? `${prev}\n\n${newEntry}` : newEntry;
+                });
+              }}
+              onRecognize={(data, logText) => {
+                setFormData(prev => ({
+                  ...prev, 
+                  passportId: data.passportId || prev.passportId,
+                  name: data.name || prev.name,
+                  country: data.country || prev.country,
+                  nationality: data.nationality || prev.nationality,
+                  dob: data.dob || prev.dob,
+                  sex: data.sex || prev.sex,
+                  expiryDate: data.expiryDate || prev.expiryDate
+                }));
+                setToast('✅ 识别成功！请核对信息。');
+                if (logText) {
+                  const timestamp = new Date().toLocaleTimeString();
+                  setSystemLog(prev => `${prev}\n\n[✨ ${timestamp}] 读取完成\n${logText}`);
+                }
+                setTimeout(() => setToast(''), 3000);
+              }}
+              onScanError={(err, logText) => {
+                setToast('❌ 识别失败: ' + err);
+                if (logText) {
+                  const timestamp = new Date().toLocaleTimeString();
+                  setSystemLog(prev => `${prev}\n\n[❌ ${timestamp}] 读取失败\n${logText}`);
+                }
+                setTimeout(() => setToast(''), 4000);
+              }}
+            />
           </div>
 
           {/* Manual Entry Form */}
@@ -285,13 +314,36 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
                 <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">姓名 (拼音或全名) <span className="text-accent">*</span></label>
                 <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent transition-colors" />
               </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">签发日期</label>
-                <input type="date" value={formData.issueDate} onChange={e => setFormData({...formData, issueDate: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+              
+              <div className="col-span-2 grid grid-cols-3 gap-6">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">国籍 (Nationality)</label>
+                  <input type="text" value={formData.nationality} onChange={e => setFormData({...formData, nationality: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">签发国 (Issuing Country)</label>
+                  <input type="text" value={formData.country} onChange={e => setFormData({...formData, country: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">性别 (Sex)</label>
+                  <select value={formData.sex} onChange={e => setFormData({...formData, sex: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent">
+                    <option value="">-</option>
+                    <option value="M">男 (M)</option>
+                    <option value="F">女 (F)</option>
+                    <option value="X">其他 (X)</option>
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">失效日期</label>
-                <input type="date" value={formData.expiryDate} onChange={e => setFormData({...formData, expiryDate: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+
+              <div className="col-span-2 grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">出生年月</label>
+                  <input type="date" value={formData.dob} onChange={e => setFormData({...formData, dob: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">失效日期</label>
+                  <input type="date" value={formData.expiryDate} onChange={e => setFormData({...formData, expiryDate: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
               </div>
             </div>
 
@@ -302,6 +354,14 @@ function EntryView({ currentUser, records, onAdd, onUpdate }: {
             </div>
           </form>
         </div>
+
+        {systemLog && (
+          <div className="glass-panel w-full rounded-xl p-4 mt-6 h-64 overflow-y-auto border border-border shadow-md">
+            <h3 className="text-[10px] uppercase tracking-wider opacity-60 mb-2 font-semibold">识别诊断日志</h3>
+            <pre className="text-[11px] text-main whitespace-pre-wrap font-mono leading-relaxed">{systemLog}</pre>
+            <div ref={logEndRef} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -712,7 +772,7 @@ function QueryView({ records, currentUser, onUpdate, onDelete }: {
                   </div>
 
                   <div className="flex flex-col items-center justify-center text-xs text-muted space-y-0.5">
-                    <div>签发: {r.issueDate || '-'}</div>
+                    <div>出生: {r.dob || '-'}</div>
                     <div>失效: {r.expiryDate || '-'}</div>
                   </div>
 
@@ -800,10 +860,29 @@ function QueryView({ records, currentUser, onUpdate, onDelete }: {
                 <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">姓名</label>
                 <input type="text" value={editingRecord.name} onChange={e => setEditingRecord({...editingRecord, name: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
               </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">国籍</label>
+                  <input type="text" value={editingRecord.nationality || ''} onChange={e => setEditingRecord({...editingRecord, nationality: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">签发国</label>
+                  <input type="text" value={editingRecord.country || ''} onChange={e => setEditingRecord({...editingRecord, country: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">性别</label>
+                  <select value={editingRecord.sex || ''} onChange={e => setEditingRecord({...editingRecord, sex: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent">
+                    <option value="">-</option>
+                    <option value="M">男 (M)</option>
+                    <option value="F">女 (F)</option>
+                    <option value="X">其他 (X)</option>
+                  </select>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">签发日期</label>
-                  <input type="date" value={editingRecord.issueDate} onChange={e => setEditingRecord({...editingRecord, issueDate: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent " />
+                  <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">出生年月</label>
+                  <input type="date" value={editingRecord.dob || ''} onChange={e => setEditingRecord({...editingRecord, dob: e.target.value})} className="w-full bg-surface border-border shadow-sm rounded px-3 py-2 text-sm text-main focus:outline-none focus:border-accent " />
                 </div>
                 <div>
                   <label className="block text-[10px] uppercase tracking-wider opacity-60 mb-1.5">失效日期</label>
@@ -846,7 +925,7 @@ function QueryView({ records, currentUser, onUpdate, onDelete }: {
             
             <div className="p-6 space-y-6">
               {/* Profile info */}
-              <div className="grid grid-cols-2 gap-4 text-sm bg-primary p-4 rounded-lg border border-border">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 text-sm bg-primary p-4 rounded-lg border border-border">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">姓名</div>
                   <div className="font-medium text-main">{viewingRecord.name}</div>
@@ -856,8 +935,20 @@ function QueryView({ records, currentUser, onUpdate, onDelete }: {
                   <div className="font-medium text-main tracking-wider">{viewingRecord.passportId}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">签发日期</div>
-                  <div className="text-main/80">{viewingRecord.issueDate || '-'}</div>
+                  <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">国籍</div>
+                  <div className="font-medium text-main">{viewingRecord.nationality || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">签发国</div>
+                  <div className="font-medium text-main">{viewingRecord.country || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">性别</div>
+                  <div className="font-medium text-main">{viewingRecord.sex === 'M' ? '男 (M)' : viewingRecord.sex === 'F' ? '女 (F)' : viewingRecord.sex || '-'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">出生日期</div>
+                  <div className="font-medium text-main">{viewingRecord.dob || '-'}</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider opacity-50 mb-1">失效日期</div>

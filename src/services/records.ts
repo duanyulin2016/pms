@@ -24,8 +24,10 @@ export function subscribeToRecords(onUpdate: (records: PassportRecord[]) => void
     try {
       const data = await fetchAPI('/records');
       onUpdate(data);
-    } catch (e) {
-      console.error('Polling error:', e);
+    } catch (e: any) {
+      if (e.message !== 'Failed to fetch' && String(e) !== 'TypeError: Failed to fetch') {
+        console.error('Polling error:', e);
+      }
     }
   };
 

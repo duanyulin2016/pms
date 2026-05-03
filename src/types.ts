@@ -13,7 +13,10 @@ export interface PassportRecord {
   id: string;
   passportId: string;
   name: string;
-  issueDate: string;
+  country?: string;
+  nationality?: string;
+  dob?: string;
+  sex?: string;
   expiryDate: string;
   entryTime: string;
   exitTime?: string;
